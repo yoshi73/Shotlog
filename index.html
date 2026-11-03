@@ -181,6 +181,8 @@ async function renderRound(){
    </div>
    <input type="file" id="rf" accept="video/*" capture="environment" hidden onchange="if(this.files[0])addClip(this.files[0]);this.value=''">
    <div style="display:flex;justify-content:center"><button id="rb" onclick="toggleRec()" aria-label="録画" style="width:84px;height:84px;border-radius:42px;border:6px solid var(--g);background:#fff;padding:0"><div id="rd" style="margin:auto;width:56px;height:56px;border-radius:28px;background:#C0392B"></div></button></div>
+   <div id="err" style="display:none;background:#F8D7D2;color:#8A2A1E;border-radius:12px;padding:10px 14px;font-size:13px"></div>
+   <div id="saved" class="hint" style="text-align:center"></div>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 14px"><div id="last" style="font-size:14px"></div><button id="undo" class="btn sm sub" onclick="undo()"></button></div>
   </div>
   <div style="position:fixed;left:0;right:0;bottom:0;padding:10px 20px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)"><button class="btn" style="background:var(--lime);color:var(--ink)" onclick="nextHole()">次のホール ›</button></div>`;
@@ -192,6 +194,7 @@ function upd(){if(view!=='round'||!R)return;const h=R.hole,par=R.pars[h],yd=R.ya
   $('ov').innerHTML=`<div style="background:#1F4D3A;padding:3px 10px">${esc(pname())}</div><div style="background:#17261F;padding:3px 10px;white-space:nowrap">HOLE ${h}${par?' | PAR '+par:''}${yd?' | '+esc(yd)+' YDS':''}</div>`;
   $('rd').style.borderRadius=rec?'8px':'28px';$('rd').style.width=$('rd').style.height=rec?'30px':'56px';
   const rp=$('rp');rp.style.display=rec?'block':'none';
+  const here=R.clips.filter(c=>c.hole===h),lk=here.length?here[here.length-1].kb:0;$('saved').textContent=here.length?`${h}番に ${here.length}本保存済み(最後の1本 ${lk}KB)`:`${h}番はまだ保存なし`;
   const hi=R.hist[R.hist.length-1];
   $('last').textContent=!hi?'まだ操作はありません':hi.t==='clip'?`${hi.hole}番 ${hi.n}打目 を保存しました`:`${hi.from}番 → ${R.hole}番`;
   const u=$('undo');u.textContent=!hi?'—':hi.t==='clip'?'撮り直す':'戻す';u.disabled=!hi;u.style.opacity=hi?1:.4}
@@ -201,12 +204,13 @@ function toggleRec(){rec?stopRec():startRec()}
 function startRec(){if(!stream||typeof MediaRecorder==='undefined'){$('rf').click();return}
   const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
   chunks=[];mr=new MediaRecorder(stream,mt?{mimeType:mt}:{});mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
-  mr.onstop=async()=>{await addClip(new Blob(chunks,{type:mr.mimeType||mt||'video/mp4'}))};
-  mr.start();rec=true;t0=Date.now();timer=setTimeout(stopRec,10000);
+  mr.onstop=async()=>{const b=new Blob(chunks,{type:mr.mimeType||mt||'video/mp4'});if(!b.size){msg('録画が空でした(type:'+(mr.mimeType||mt||'なし')+')');return}try{await addClip(b)}catch(e){msg('保存エラー: '+(e.name||e))}};
+  mr.onerror=e=>msg('録画エラー: '+(e.error&&e.error.name||'?'));mr.start(1000);rec=true;t0=Date.now();timer=setTimeout(stopRec,10000);
   tick=setInterval(()=>{const r=$('rp');if(r)r.textContent='● 撮影中 '+Math.min(10,Math.ceil((Date.now()-t0)/1000))+'/10秒'},200);upd()}
 function stopRec(){if(!rec)return;rec=false;clearTimeout(timer);clearInterval(tick);try{mr.stop()}catch(_){}upd()}
+function msg(t){const e=$('err');if(e){e.textContent=t;e.style.display='block'}}
 async function addClip(blob){const id=uid(),n=cnt(R.hole)+1;await put('media',{id,type:blob.type||'video/mp4',blob,name:''});
-  R.media.push(id);R.clips.push({id,hole:R.hole,ex:false});R.hist.push({t:'clip',id,hole:R.hole,n});await put('sessions',R);log('clip',{hole:R.hole});upd()}
+  R.media.push(id);R.clips.push({id,hole:R.hole,ex:false,kb:Math.round(blob.size/1024)});R.hist.push({t:'clip',id,hole:R.hole,n});await put('sessions',R);log('clip',{hole:R.hole});upd()}
 async function undo(){const hi=R.hist.pop();if(!hi)return;
   if(hi.t==='clip'){R.clips=R.clips.filter(c=>c.id!==hi.id);R.media=R.media.filter(x=>x!==hi.id);await del('media',hi.id)}
   else R.hole=hi.from;
