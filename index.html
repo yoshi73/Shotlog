@@ -1,0 +1,154 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Shotlog">
+<meta name="theme-color" content="#1F4D3A"><link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="icon.svg">
+<title>Shotlog</title>
+<style>
+:root{--g:#1F4D3A;--bg:#F4F1E8;--ink:#17261F;--sub:#4A5750;--chip:#E6E1D1;--lime:#C8E36B;--card:#FBF9F3;--line:#E1DCCB}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,'Noto Sans JP',system-ui,sans-serif;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+button{font:inherit;cursor:pointer}
+.top{padding:calc(14px + env(safe-area-inset-top)) 20px 8px;display:flex;align-items:center;justify-content:space-between}
+h1{margin:0;font-size:24px}.wrap{padding:4px 20px 24px;display:flex;flex-direction:column;gap:18px}
+.lab{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:6px}
+.btn{height:48px;border:0;border-radius:12px;background:var(--g);color:var(--bg);font-weight:700;font-size:16px;width:100%}
+.btn.sub{background:var(--chip);color:var(--g)}.btn.sm{height:40px;width:auto;padding:0 16px;font-size:14px}
+input[type=text],textarea{width:100%;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px 14px;font:inherit;font-size:16px}
+textarea{min-height:120px;line-height:1.6}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{height:40px;min-width:44px;padding:0 14px;border-radius:10px;border:0;background:var(--chip);color:var(--g);font-weight:700}
+.chip.on{background:var(--g);color:var(--bg)}
+.seg{display:flex;background:var(--chip);border-radius:12px;padding:3px}.seg button{flex:1;height:38px;border:0;border-radius:10px;background:none;font-weight:700;color:var(--g)}.seg .on{background:var(--g);color:var(--bg)}
+.prev{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;white-space:pre-line}
+.prev b{color:var(--g)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding:4px}
+.th{position:relative;flex:0 0 auto;width:64px;height:64px;border-radius:12px;background:#D9D3C0;border:3px solid transparent;overflow:hidden;padding:0}
+.th.on{border-color:var(--g)}.th video,.th img{width:100%;height:100%;object-fit:cover;display:block}
+.th .x{position:absolute;right:0;top:0;background:#17261F;color:#fff;width:22px;height:22px;border-radius:0 0 0 8px;font-size:13px;line-height:22px;text-align:center}
+.th .st{position:absolute;right:2px;bottom:2px;background:var(--lime);border-radius:10px;width:20px;height:20px;font-size:12px;line-height:20px;text-align:center}
+.row{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;color:var(--ink)}
+.row small{color:var(--sub);display:block;margin-top:4px;font-size:13px}
+.pill{background:var(--chip);color:var(--g);border-radius:16px;padding:4px 12px;font-weight:700;font-size:14px;height:30px;white-space:nowrap}
+.tab{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+.tab button{flex:1;height:56px;border:0;background:none;font-weight:700;color:var(--sub);font-size:14px}.tab .on{color:var(--g)}
+.media{width:100%;border-radius:16px;background:#000;max-height:60vh}
+.hint{font-size:12px;color:var(--sub)}
+</style></head><body>
+<div id="app"></div>
+<nav class="tab" id="tab"></nav>
+<script>
+// ---------- storage (IndexedDB) ----------
+let db;
+const open=()=>new Promise((res,rej)=>{const r=indexedDB.open('shotlog',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('sessions',{keyPath:'id'});d.createObjectStore('media',{keyPath:'id'});d.createObjectStore('events',{autoIncrement:true})};r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>rej(r.error)});
+const tx=(s,m='readonly')=>db.transaction(s,m).objectStore(s);
+const p=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const all=s=>p(tx(s).getAll()), get=(s,k)=>p(tx(s).get(k)), put=(s,v)=>p(tx(s,'readwrite').put(v)), del=(s,k)=>p(tx(s,'readwrite').delete(k));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const log=(e,x)=>{try{tx('events','readwrite').add({t:Date.now(),e,...x})}catch(_){}};
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+
+// ---------- state ----------
+const CLUBS=['Dr','3W','5W','UT','5I','6I','7I','8I','9I','PW','AW','SW','Pt'];
+let view='new',cur=null,draft=null,sessions=[],urls=[];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fmt=s=>{const d=new Date(s+'T00:00:00');return (d.getMonth()+1)+'月'+d.getDate()+'日('+'日月火水木金土'[d.getDay()]+')'};
+const blobUrl=b=>{const u=URL.createObjectURL(b);urls.push(u);return u};
+const freeUrls=()=>{urls.forEach(URL.revokeObjectURL);urls=[]};
+
+async function load(){sessions=(await all('sessions')).sort((a,b)=>b.date.localeCompare(a.date)||b.created-a.created)}
+function newDraft(kind){return {id:uid(),kind:kind||'practice',date:today(),place:'',cond:3,memo:'',clubs:[],media:[],best:null,created:Date.now()}}
+function go(v,s){view=v;if(s!==undefined)cur=s;log('view',{v});render()}
+
+// ---------- render ----------
+async function render(){
+  freeUrls();await load();
+  $('tab').innerHTML=[['new','入力'],['list','一覧']].map(([k,l])=>`<button class="${view===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
+  if(view==='new')return renderNew();
+  if(view==='list')return renderList();
+  if(view==='detail')return renderDetail();
+}
+async function thumbs(ids,sel,best,rm){
+  let h='';for(let i=0;i<ids.length;i++){const m=await get('media',ids[i]);if(!m)continue;const u=blobUrl(m.blob);
+    const tag=m.type.startsWith('video')?`<video src="${u}#t=0.1" muted playsinline preload="metadata"></video>`:`<img src="${u}">`;
+    h+=`<button class="th ${i===sel?'on':''}" onclick="pick(${i})">${tag}${ids[i]===best?'<span class="st">★</span>':''}${rm?`<span class="x" onclick="event.stopPropagation();rmMedia(${i})">×</span>`:''}</button>`}
+  return h}
+async function renderNew(){
+  if(!draft)draft=newDraft();
+  const prevS=sessions.find(s=>s.kind===draft.kind&&s.memo);
+  const prev=prevS?`<div><div class="lab">前回のメモ(${fmt(prevS.date)})</div><div class="prev">${esc(prevS.memo)}</div></div>`:'';
+  $('app').innerHTML=`<div class="top"><h1>Shotlog</h1><button class="btn sm sub" onclick="exportEvents()">使用記録</button></div>
+  <div class="wrap">
+  <div class="seg"><button class="${draft.kind==='practice'?'on':''}" onclick="setKind('practice')">練習</button><button class="${draft.kind==='round'?'on':''}" onclick="setKind('round')">ラウンド</button></div>
+  ${prev}
+  <div><div class="lab">日付</div><input type="text" id="date" value="${draft.date}" onchange="draft.date=this.value" style="display:none"><input type="date" value="${draft.date}" onchange="draft.date=this.value" style="width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font:inherit;background:var(--card)"></div>
+  <div><div class="lab">場所</div><input type="text" value="${esc(draft.place)}" placeholder="○○ゴルフ練習場" oninput="draft.place=this.value"></div>
+  <div><div class="lab">調子</div><div class="chips">${[1,2,3,4,5].map(n=>`<button class="chip ${draft.cond===n?'on':''}" onclick="draft.cond=${n};renderNew()">${n}</button>`).join('')}</div></div>
+  <div><div class="lab">メモ</div><textarea oninput="draft.memo=this.value" placeholder="意識したこと、次にやること">${esc(draft.memo)}</textarea></div>
+  <div><div class="lab">使ったクラブ</div><div class="chips">${CLUBS.map(c=>`<button class="chip ${draft.clubs.includes(c)?'on':''}" onclick="toggleClub('${c}')">${c}</button>`).join('')}</div></div>
+  <div><div class="lab">動画・写真</div>
+   <div class="thumbs" id="th">${await thumbs(draft.media,-1,draft.best,true)}</div>
+   <input type="file" id="file" accept="video/*,image/*" multiple hidden onchange="addFiles(this.files)">
+   <button class="btn sub" onclick="$('file').click()" style="margin-top:8px">動画・写真を選ぶ</button>
+   <div class="hint" style="margin-top:6px">カメラロールから選ぶと、アプリ内に取り込まれます(元は消えません)</div></div>
+  <button class="btn" onclick="save()">保存する</button></div>`}
+function setKind(k){draft.kind=k;renderNew()}
+function toggleClub(c){const a=draft.clubs;const i=a.indexOf(c);i>=0?a.splice(i,1):a.push(c);renderNew()}
+async function addFiles(fl){for(const f of fl){const id=uid();await put('media',{id,type:f.type||'video/mp4',blob:f,name:f.name});draft.media.push(id)}log('import',{n:fl.length});renderNew()}
+async function rmMedia(i){const id=draft.media[i];draft.media.splice(i,1);if(draft.best===id)draft.best=null;await del('media',id);renderNew()}
+async function save(){await put('sessions',draft);log('save',{kind:draft.kind,media:draft.media.length});cur=draft.id;draft=null;go('detail',cur)}
+
+async function renderList(){
+  $('app').innerHTML=`<div class="top"><h1>一覧</h1></div><div class="wrap">${sessions.length?sessions.map(s=>`<button class="row" onclick="go('detail','${s.id}')"><div><b>${fmt(s.date)}${s.kind==='round'?' ・ラウンド':''}</b><small>${esc(s.place||'場所なし')} ・ 動画/写真 ${s.media.length}</small></div><span class="pill">調子 ${s.cond}</span></button>`).join(''):'<div class="hint">まだ記録がありません。「入力」から1件つくってください。</div>'}</div>`}
+
+let sel=0;
+function pick(i){sel=i;renderDetail()}
+async function renderDetail(){
+  const s=sessions.find(x=>x.id===cur);if(!s)return go('list');
+  const id=s.media[sel]||s.media[0];let main='';
+  if(id){const m=await get('media',id);if(m){const u=blobUrl(m.blob);main=m.type.startsWith('video')?`<video class="media" src="${u}" controls playsinline></video>`:`<img class="media" src="${u}">`}}
+  const isBest=id&&s.best===id;
+  $('app').innerHTML=`<div class="top"><button class="btn sm sub" onclick="go('list')">‹ 一覧</button><div style="display:flex;gap:8px"><button class="btn sm" onclick="shareCard()">共有</button><button class="btn sm sub" onclick="edit()">編集</button></div></div>
+  <div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><h1>${fmt(s.date)}</h1><div class="hint" style="font-size:14px">${esc(s.place)}${s.kind==='round'?' ・ラウンド':''}</div></div><span class="pill">調子 ${s.cond}</span></div>
+  ${main}
+  ${s.media.length?`<div class="thumbs">${await thumbs(s.media,sel,s.best,false)}</div><button class="btn ${isBest?'':'sub'}" onclick="toggleBest()">${isBest?'★ ベストの1打(タップで外す)':'☆ これをベストの1打にする'}</button>`:''}
+  <div><div class="lab">メモ</div><div class="prev">${esc(s.memo)||'—'}</div></div>
+  <div><div class="lab">使ったクラブ</div><div class="chips">${s.clubs.map(c=>`<span class="chip">${c}</span>`).join('')||'—'}</div></div>
+  <button class="btn sub" onclick="remove()">この記録を削除</button></div>`}
+async function toggleBest(){const s=sessions.find(x=>x.id===cur);const id=s.media[sel]||s.media[0];s.best=s.best===id?null:id;await put('sessions',s);log('best',{on:!!s.best});renderDetail()}
+function edit(){draft=JSON.parse(JSON.stringify(sessions.find(x=>x.id===cur)));go('new')}
+async function remove(){if(!confirm('削除しますか?'))return;const s=sessions.find(x=>x.id===cur);for(const m of s.media)await del('media',m);await del('sessions',cur);log('delete',{});go('list')}
+let fr=0;
+async function shareCard(){fr=0;const s=sessions.find(x=>x.id===cur);const id=s.best||s.media[0];
+  let img=null;if(id){const m=await get('media',id);if(m){img=await frameOf(m)}}
+  window._card={s,img};log('card_open',{});drawSheet()}
+function frameOf(m){return new Promise(res=>{const u=URL.createObjectURL(m.blob);
+  if(m.type.startsWith('video')){const v=document.createElement('video');v.muted=true;v.playsInline=true;v.src=u;v.onloadeddata=()=>{v.currentTime=Math.min(0.5,(v.duration||1)/2)};v.onseeked=()=>res(v);v.onerror=()=>res(null)}
+  else{const i=new Image();i.onload=()=>res(i);i.onerror=()=>res(null);i.src=u}})}
+function paint(cv,{s,img},f){const W=cv.width=1080,H=cv.height=1920,c=cv.getContext('2d');
+  c.fillStyle='#17261F';c.fillRect(0,0,W,H);
+  const draw=(x,y,w,h)=>{if(!img){c.fillStyle='#D9D3C0';c.fillRect(x,y,w,h);return}
+    const iw=img.videoWidth||img.width,ih=img.videoHeight||img.height,r=Math.max(w/iw,h/ih),dw=iw*r,dh=ih*r;
+    c.save();c.beginPath();c.rect(x,y,w,h);c.clip();c.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh);c.restore()};
+  const d=new Date(s.date+'T00:00:00'),ds=(d.getMonth()+1)+'/'+d.getDate();
+  c.textBaseline='alphabetic';
+  if(f===0){draw(0,0,W,H);const g=c.createLinearGradient(0,H-700,0,H);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.75)');c.fillStyle=g;c.fillRect(0,H-700,W,700);
+    c.fillStyle='#fff';c.font='bold 150px -apple-system,sans-serif';c.fillText(ds,70,H-300);
+    c.font='46px -apple-system,sans-serif';c.fillText((s.place||'')+(s.kind==='round'?'  ROUND':'  PRACTICE'),70,H-220);
+    if(s.best){c.fillStyle='#C8E36B';c.font='bold 48px -apple-system,sans-serif';c.fillText('★ BEST SHOT',70,H-140)}}
+  else{c.fillStyle='#F4F1E8';c.fillRect(0,0,W,H);draw(90,150,900,1200);
+    c.fillStyle='#1F4D3A';c.font='bold 120px -apple-system,sans-serif';c.fillText(ds,90,1500);
+    c.fillStyle='#4A5750';c.font='44px -apple-system,sans-serif';c.fillText(s.place||'',90,1580);
+    if(s.memo){c.font='40px -apple-system,sans-serif';c.fillText(s.memo.split('\n')[0].slice(0,24),90,1660)}}
+  // app name: always on
+  c.font='bold 56px -apple-system,sans-serif';c.fillStyle=f===0?'#fff':'#1F4D3A';const t='Shotlog';c.fillText(t,W-90-c.measureText(t).width,H-70)}
+function drawSheet(){let o=$('sheet');if(!o){o=document.createElement('div');o.id='sheet';o.style.cssText='position:fixed;inset:0;background:#F4F1E8;z-index:9;display:flex;flex-direction:column;gap:12px;padding:calc(14px + env(safe-area-inset-top)) 20px 20px;align-items:center';document.body.appendChild(o)}
+  o.innerHTML='<div class="seg" style="width:100%"><button class="'+(fr===0?'on':'')+'" onclick="fr=0;drawSheet()">フルスクリーン</button><button class="'+(fr===1?'on':'')+'" onclick="fr=1;drawSheet()">ポラロイド</button></div><canvas id="cv" style="flex:1;min-height:0;aspect-ratio:9/16;border-radius:12px;max-width:100%"></canvas><button class="btn" onclick="shareImg()">共有する</button><button class="btn sub" onclick="$(\'sheet\').remove()">閉じる</button>';
+  paint($('cv'),window._card,fr)}
+async function shareImg(){const cv=$('cv');const b=await new Promise(r=>cv.toBlob(r,'image/png'));const f=new File([b],'shotlog.png',{type:'image/png'});log('share',{frame:fr});
+  if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='shotlog.png';a.click()}}
+async function exportEvents(){const ev=await all('events');const t=ev.length+'件の操作記録\n'+JSON.stringify(ev.slice(-200));const b=new Blob([t],{type:'text/plain'});const f=new File([b],'shotlog-events.txt',{type:'text/plain'});
+  if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='shotlog-events.txt';a.click()}}
+
+open().then(()=>{if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});log('launch',{});render()});
+</script></body></html>
