@@ -166,7 +166,7 @@ function newRound(){return {...newDraft('round'),active:true,hole:1,pars:{},yard
 const cnt=h=>R.clips.filter(c=>c.hole===h).length;
 function stopCam(){if(rec){try{mr.onstop=null;mr.stop()}catch(_){}rec=false;clearTimeout(timer);clearInterval(tick)}
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
-async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:true});
+async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio:true});
   const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block'}}
 async function renderRound(){
   R=sessions.find(s=>s.active&&s.kind==='round')||null;
@@ -184,6 +184,7 @@ async function renderRound(){
    </div>
    <input type="file" id="rf" accept="video/*" capture="environment" hidden onchange="if(this.files[0])addClip(this.files[0]);this.value=''">
    <div style="display:flex;justify-content:center"><button id="rb" onclick="toggleRec()" aria-label="録画" style="width:84px;height:84px;border-radius:42px;border:6px solid var(--g);background:#fff;padding:0"><div id="rd" style="margin:auto;width:56px;height:56px;border-radius:28px;background:#C0392B"></div></button></div>
+   <button class="btn sub" style="height:40px;font-size:14px" onclick="$('rf').click()">標準カメラで撮る(高画質)</button>
    <div id="err" style="display:none;background:#F8D7D2;color:#8A2A1E;border-radius:12px;padding:10px 14px;font-size:13px"></div>
    <div id="saved" class="hint" style="text-align:center"></div>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 14px"><div id="last" style="font-size:14px"></div><button id="undo" class="btn sm sub" onclick="undo()"></button></div>
@@ -206,7 +207,7 @@ let ysave=null;function setYard(v){R.yards[R.hole]=v;if(!v)delete R.yards[R.hole
 function toggleRec(){rec?stopRec():startRec()}
 function startRec(){if(!stream||typeof MediaRecorder==='undefined'){$('rf').click();return}
   const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
-  chunks=[];mr=new MediaRecorder(stream,mt?{mimeType:mt}:{});mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  chunks=[];mr=new MediaRecorder(stream,Object.assign(mt?{mimeType:mt}:{},{videoBitsPerSecond:14000000}));mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
   mr.onstop=async()=>{const b=new Blob(chunks,{type:mr.mimeType||mt||'video/mp4'});if(!b.size){msg('録画が空でした(type:'+(mr.mimeType||mt||'なし')+')');return}try{await addClip(b)}catch(e){msg('保存エラー: '+(e.name||e))}};
   mr.onerror=e=>msg('録画エラー: '+(e.error&&e.error.name||'?'));mr.start(1000);rec=true;t0=Date.now();timer=setTimeout(stopRec,10000);
   tick=setInterval(()=>{const r=$('rp');if(r)r.textContent='● 撮影中 '+Math.min(10,Math.ceil((Date.now()-t0)/1000))+'/10秒'},200);upd()}
@@ -247,11 +248,11 @@ function drawOvl(c,W,h,par,yd){const k=W/390,t='HOLE '+h+(par?' | PAR '+par:'')+
   c.fillStyle='#17261F';c.fillRect(x,y+22*k,w,24*k);c.fillStyle='#fff';c.fillText(t,x+w/2,y+39*k);c.textAlign='left'}
 async function exportHole(h){
   const cl=R.clips.filter(c=>c.hole===h&&!c.ex);if(!cl.length)return;const xp=$('xp');
-  const W=720,H=1280,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
+  const W=1080,H=1920,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
   const out=cv.captureStream(30),v=document.createElement('video');v.playsInline=true;v.setAttribute('playsinline','');
   try{const ac=new(window.AudioContext||window.webkitAudioContext)();ac.resume();const src=ac.createMediaElementSource(v),d=ac.createMediaStreamDestination();src.connect(d);d.stream.getAudioTracks().forEach(t=>out.addTrack(t))}catch(_){}
   const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
-  const rc=new MediaRecorder(out,mt?{mimeType:mt}:{}),ch=[];rc.ondataavailable=e=>e.data.size&&ch.push(e.data);
+  const rc=new MediaRecorder(out,Object.assign(mt?{mimeType:mt}:{},{videoBitsPerSecond:16000000})),ch=[];rc.ondataavailable=e=>e.data.size&&ch.push(e.data);
   const done=new Promise(r=>rc.onstop=r);rc.start();
   const par=R.pars[h],yd=R.yards[h];
   for(let i=0;i<cl.length;i++){
@@ -262,7 +263,7 @@ async function exportHole(h){
     await new Promise(res=>{let fin=false;const end=()=>{if(!fin){fin=true;res()}};v.onended=end;setTimeout(end,12500);
       const f=()=>{if(fin)return;c.fillStyle='#000';c.fillRect(0,0,W,H);const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);
         c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);drawOvl(c,W,h,par,yd);
-        c.font='bold 30px -apple-system,sans-serif';c.fillStyle='rgba(255,255,255,.9)';c.textAlign='right';c.fillText('Shotlog',W-24,H-30);c.textAlign='left';requestAnimationFrame(f)};f()});
+        const q=W/720;c.font=`bold ${30*q}px -apple-system,sans-serif`;c.fillStyle='rgba(255,255,255,.9)';c.textAlign='right';c.fillText('Shotlog',W-24*q,H-30*q);c.textAlign='left';requestAnimationFrame(f)};f()});
     v.pause();URL.revokeObjectURL(u)}
   rc.stop();await done;
   const ext=(mt||'').includes('mp4')?'mp4':'webm',blob=new Blob(ch,{type:mt||'video/webm'}),file=new File([blob],`shotlog-hole${h}.${ext}`,{type:blob.type});
