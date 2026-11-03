@@ -168,8 +168,13 @@ function newRound(){return {...newDraft('round'),active:true,hole:1,pars:{},yard
 const cnt=h=>R.clips.filter(c=>c.hole===h).length;
 function stopCam(){if(rec){try{mr.onstop=null;mr.stop()}catch(_){}rec=false;clearTimeout(timer);clearInterval(tick)}
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
-async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60}},audio:true});
-  const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}try{const st=stream.getVideoTracks()[0].getSettings();const e=$('camset');if(e)e.textContent=`撮影設定: ${st.width}×${st.height} ・ ${Math.round(st.frameRate||0)}fps`}catch(_){}}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block'}}
+async function startCam(){
+  const tries=[{width:{ideal:1920},height:{ideal:1080},frameRate:{exact:60}},{width:{ideal:1280},height:{ideal:720},frameRate:{exact:60}},{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60}}];
+  stream=null;
+  for(const t of tries){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',...t},audio:true});break}catch(e){stream=null}}
+  if(!stream){try{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true})}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block';return}}
+  const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}
+  try{const st=stream.getVideoTracks()[0].getSettings();const e=$('camset');if(e)e.textContent=`撮影設定: ${st.width}×${st.height} ・ ${Math.round(st.frameRate||0)}fps`}catch(_){}}
 async function renderRound(){
   R=sessions.find(s=>s.active&&s.kind==='round')||null;
   if(!R){R=newRound();await put('sessions',R);log('round_start',{})}
@@ -245,7 +250,6 @@ async function renderRPre(){
     <div id="pvn" style="position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;pointer-events:none"></div>
     <div style="position:absolute;right:10px;bottom:46px;color:rgba(255,255,255,.9);font-weight:700;font-size:11px;pointer-events:none">Shotlog</div>
    </div>
-   <button class="btn" onclick="fullPlay(${h})" ${live.some(c=>c.hole===h)?'':'disabled style="opacity:.4"'}>全画面で再生(画面収録用・コマ落ちなし)</button>
    <button class="btn sub" onclick="playHole(${h})" ${live.some(c=>c.hole===h)?'':'disabled style="opacity:.4"'}>▶ このホールを通して見る</button>
    <div class="thumbs" style="gap:12px;padding:6px 4px">${tiles||'<div class="hint">このホールの動画はありません</div>'}</div>
    <div class="seg"><button class="${xq===1080?'on':''}" onclick="xq=1080;renderRPre()">高画質 1080p</button><button class="${xq===720?'on':''}" onclick="xq=720;renderRPre()">なめらか 720p</button></div>
@@ -259,19 +263,6 @@ async function playQueue(ids,i){pvq=ids;pvi=i;log('preview',{n:ids.length});pvPl
 async function pvPlay(){const v=$('pvv');if(!v||pvi>=pvq.length){const n=$('pvn');if(n)n.textContent='';return}
   const m=await get('media',pvq[pvi]);if(!m)return;if(pvu)URL.revokeObjectURL(pvu);pvu=URL.createObjectURL(m.blob);
   v.src=pvu;v.onended=()=>{pvi++;pvPlay()};$('pvn').textContent=(pvi+1)+' / '+pvq.length;v.play().catch(()=>{})}
-async function fullPlay(h){
-  const ids=R.clips.filter(c=>c.hole===h&&!c.ex).map(c=>c.id);if(!ids.length)return;log('fullplay',{hole:h,n:ids.length});
-  const ih=innerHeight,iw=innerWidth,w=Math.min(iw,ih*9/16),k=w/390,par=R.pars[h],yd=R.yards[h];
-  const o=document.createElement('div');o.id='fp';o.style.cssText='position:fixed;inset:0;background:#000;z-index:30;display:flex;align-items:center;justify-content:center';
-  o.innerHTML=`<div style="position:relative;width:${w}px;height:${w*16/9}px;max-height:100%;overflow:hidden"><video id="fpv" playsinline style="width:100%;height:100%;object-fit:cover"></video>
-   <div style="position:absolute;right:${12*k}px;top:${(16+env0())*k}px;border-radius:${4*k}px;overflow:hidden;font-weight:700;font-size:${12*k}px;color:#fff;text-align:center"><div style="background:#1F4D3A;padding:${3*k}px ${12*k}px">${esc(pname())}</div><div style="background:#17261F;padding:${3*k}px ${12*k}px;white-space:nowrap">HOLE ${h}${par?' | PAR '+par:''}${yd?' | '+esc(yd)+' YDS':''}</div></div>
-   <div style="position:absolute;right:${24*k}px;bottom:${30*k}px;color:rgba(255,255,255,.9);font-weight:700;font-size:${30*k*0.54}px">Shotlog</div></div>`;
-  document.body.appendChild(o);try{if(navigator.wakeLock)window._wl=await navigator.wakeLock.request('screen')}catch(_){}
-  const v=$('fpv');let i=0,u=null;const close=()=>{try{v.pause()}catch(_){}if(u)URL.revokeObjectURL(u);o.remove();try{window._wl&&window._wl.release()}catch(_){}};
-  o.onclick=close;
-  const next=async()=>{if(i>=ids.length){setTimeout(close,600);return}const m=await get('media',ids[i++]);if(!m){next();return}if(u)URL.revokeObjectURL(u);u=URL.createObjectURL(m.blob);v.src=u;v.onended=next;v.play().catch(()=>{})};
-  setTimeout(next,1500)}
-const env0=()=>0;
 async function toggleEx(id){const c=R.clips.find(x=>x.id===id);c.ex=!c.ex;await put('sessions',R);renderRPre()}
 async function finishRound(){R.active=false;await put('sessions',R);log('round_end',{clips:R.clips.length});cur=R.id;R=null;go('detail',cur)}
 function drawOvl(c,W,h,par,yd){const k=W/390,t='HOLE '+h+(par?' | PAR '+par:'')+(yd?' | '+yd+' YDS':'');
