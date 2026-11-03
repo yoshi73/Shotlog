@@ -272,15 +272,17 @@ async function exportHole(h){
   const rc=new MediaRecorder(out,Object.assign(mt?{mimeType:mt}:{},{videoBitsPerSecond:16000000})),ch=[];rc.ondataavailable=e=>e.data.size&&ch.push(e.data);
   const done=new Promise(r=>rc.onstop=r);rc.start();
   const par=R.pars[h],yd=R.yards[h];
+  const ov=document.createElement('canvas');ov.width=W;ov.height=H;{const o=ov.getContext('2d');drawOvl(o,W,h,par,yd);const q=W/720;o.font=`bold ${30*q}px -apple-system,sans-serif`;o.fillStyle='rgba(255,255,255,.9)';o.textAlign='right';o.fillText('Shotlog',W-24*q,H-30*q)}
   for(let i=0;i<cl.length;i++){
     xp.textContent=`書き出し中 ${i+1}/${cl.length} (画面を消さずにお待ちください)`;
     const m=await get('media',cl[i].id);if(!m)continue;const u=URL.createObjectURL(m.blob);v.src=u;
     await new Promise(r=>{v.onloadeddata=r;v.onerror=r;setTimeout(r,4000)});
     await v.play().catch(()=>{});
-    await new Promise(res=>{let fin=false;const end=()=>{if(!fin){fin=true;res()}};v.onended=end;setTimeout(end,12500);
-      const f=()=>{if(fin)return;c.fillStyle='#000';c.fillRect(0,0,W,H);const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);
-        c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);drawOvl(c,W,h,par,yd);
-        const q=W/720;c.font=`bold ${30*q}px -apple-system,sans-serif`;c.fillStyle='rgba(255,255,255,.9)';c.textAlign='right';c.fillText('Shotlog',W-24*q,H-30*q);c.textAlign='left';requestAnimationFrame(f)};f()});
+    await new Promise(res=>{let fin=false;const end=()=>{if(!fin){fin=true;res()}};v.onended=end;setTimeout(end,((isFinite(v.duration)&&v.duration)||10)*1000+3000);
+      const draw=()=>{const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);c.drawImage(ov,0,0)};
+      draw();
+      if(v.requestVideoFrameCallback){const loop=()=>{if(fin)return;draw();v.requestVideoFrameCallback(loop)};v.requestVideoFrameCallback(loop)}
+      else{const f=()=>{if(fin)return;draw();requestAnimationFrame(f)};f()}});
     v.pause();URL.revokeObjectURL(u)}
   rc.stop();await done;
   const ext=(mt||'').includes('mp4')?'mp4':'webm',blob=new Blob(ch,{type:mt||'video/webm'}),file=new File([blob],`shotlog-hole${h}.${ext}`,{type:blob.type});
