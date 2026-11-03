@@ -40,7 +40,10 @@ let db;
 const open=()=>new Promise((res,rej)=>{const r=indexedDB.open('shotlog',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('sessions',{keyPath:'id'});d.createObjectStore('media',{keyPath:'id'});d.createObjectStore('events',{autoIncrement:true})};r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>rej(r.error)});
 const tx=(s,m='readonly')=>db.transaction(s,m).objectStore(s);
 const p=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
-const all=s=>p(tx(s).getAll()), get=(s,k)=>p(tx(s).get(k)), put=(s,v)=>p(tx(s,'readwrite').put(v)), del=(s,k)=>p(tx(s,'readwrite').delete(k));
+const all=s=>p(tx(s).getAll()), del=(s,k)=>p(tx(s,'readwrite').delete(k));
+// iOS Safari: Blobをそのまま保存するとUnknownErrorになるため、ArrayBufferで保存して読むときにBlobへ戻す
+const put=async(s,v)=>{if(s==='media'&&v.blob){const buf=await v.blob.arrayBuffer();v={id:v.id,type:v.type,name:v.name,buf}}return p(tx(s,'readwrite').put(v))};
+const get=async(s,k)=>{const r=await p(tx(s).get(k));if(r&&r.buf&&!r.blob)r.blob=new Blob([r.buf],{type:r.type});return r};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const log=(e,x)=>{try{tx('events','readwrite').add({t:Date.now(),e,...x})}catch(_){}};
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
