@@ -168,8 +168,8 @@ function newRound(){return {...newDraft('round'),active:true,hole:1,pars:{},yard
 const cnt=h=>R.clips.filter(c=>c.hole===h).length;
 function stopCam(){if(rec){try{mr.onstop=null;mr.stop()}catch(_){}rec=false;clearTimeout(timer);clearInterval(tick)}
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
-async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio:true});
-  const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block'}}
+async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60}},audio:true});
+  const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}try{const st=stream.getVideoTracks()[0].getSettings();const e=$('camset');if(e)e.textContent=`撮影設定: ${st.width}×${st.height} ・ ${Math.round(st.frameRate||0)}fps`}catch(_){}}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block'}}
 async function renderRound(){
   R=sessions.find(s=>s.active&&s.kind==='round')||null;
   if(!R){R=newRound();await put('sessions',R);log('round_start',{})}
@@ -184,9 +184,11 @@ async function renderRound(){
     <div id="rp" style="display:none;position:absolute;left:8px;bottom:8px;background:#C0392B;color:#fff;border-radius:12px;padding:3px 10px;font-size:12px;font-weight:700"></div>
     <div id="camerr" style="display:none;position:absolute;inset:0;color:#fff;font-size:12px;padding:30px 12px;text-align:center">カメラが使えません。下のボタンで標準カメラから撮れます</div>
    </div>
+   <div id="camset" class="hint" style="text-align:center"></div>
    <input type="file" id="rf" accept="video/*" capture="environment" hidden onchange="if(this.files[0])addClip(this.files[0]);this.value=''">
    <div style="display:flex;justify-content:center"><button id="rb" onclick="toggleRec()" aria-label="録画" style="width:84px;height:84px;border-radius:42px;border:6px solid var(--g);background:#fff;padding:0"><div id="rd" style="margin:auto;width:56px;height:56px;border-radius:28px;background:#C0392B"></div></button></div>
    <button class="btn sub" style="height:44px;font-size:14px" onclick="$('rf').click()">標準カメラで撮る(手ブレ補正・高画質)</button>
+   <div class="hint" style="text-align:center;margin-top:-4px">1打10秒以内を目安に撮ってください</div>
    <div id="err" style="display:none;background:#F8D7D2;color:#8A2A1E;border-radius:12px;padding:10px 14px;font-size:13px"></div>
    <div id="saved" class="hint" style="text-align:center"></div>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 14px"><div id="last" style="font-size:14px"></div><button id="undo" class="btn sm sub" onclick="undo()"></button></div>
@@ -243,6 +245,7 @@ async function renderRPre(){
     <div id="pvn" style="position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;pointer-events:none"></div>
     <div style="position:absolute;right:10px;bottom:46px;color:rgba(255,255,255,.9);font-weight:700;font-size:11px;pointer-events:none">Shotlog</div>
    </div>
+   <button class="btn" onclick="fullPlay(${h})" ${live.some(c=>c.hole===h)?'':'disabled style="opacity:.4"'}>全画面で再生(画面収録用・コマ落ちなし)</button>
    <button class="btn sub" onclick="playHole(${h})" ${live.some(c=>c.hole===h)?'':'disabled style="opacity:.4"'}>▶ このホールを通して見る</button>
    <div class="thumbs" style="gap:12px;padding:6px 4px">${tiles||'<div class="hint">このホールの動画はありません</div>'}</div>
    <div class="seg"><button class="${xq===1080?'on':''}" onclick="xq=1080;renderRPre()">高画質 1080p</button><button class="${xq===720?'on':''}" onclick="xq=720;renderRPre()">なめらか 720p</button></div>
@@ -256,6 +259,19 @@ async function playQueue(ids,i){pvq=ids;pvi=i;log('preview',{n:ids.length});pvPl
 async function pvPlay(){const v=$('pvv');if(!v||pvi>=pvq.length){const n=$('pvn');if(n)n.textContent='';return}
   const m=await get('media',pvq[pvi]);if(!m)return;if(pvu)URL.revokeObjectURL(pvu);pvu=URL.createObjectURL(m.blob);
   v.src=pvu;v.onended=()=>{pvi++;pvPlay()};$('pvn').textContent=(pvi+1)+' / '+pvq.length;v.play().catch(()=>{})}
+async function fullPlay(h){
+  const ids=R.clips.filter(c=>c.hole===h&&!c.ex).map(c=>c.id);if(!ids.length)return;log('fullplay',{hole:h,n:ids.length});
+  const ih=innerHeight,iw=innerWidth,w=Math.min(iw,ih*9/16),k=w/390,par=R.pars[h],yd=R.yards[h];
+  const o=document.createElement('div');o.id='fp';o.style.cssText='position:fixed;inset:0;background:#000;z-index:30;display:flex;align-items:center;justify-content:center';
+  o.innerHTML=`<div style="position:relative;width:${w}px;height:${w*16/9}px;max-height:100%;overflow:hidden"><video id="fpv" playsinline style="width:100%;height:100%;object-fit:cover"></video>
+   <div style="position:absolute;right:${12*k}px;top:${(16+env0())*k}px;border-radius:${4*k}px;overflow:hidden;font-weight:700;font-size:${12*k}px;color:#fff;text-align:center"><div style="background:#1F4D3A;padding:${3*k}px ${12*k}px">${esc(pname())}</div><div style="background:#17261F;padding:${3*k}px ${12*k}px;white-space:nowrap">HOLE ${h}${par?' | PAR '+par:''}${yd?' | '+esc(yd)+' YDS':''}</div></div>
+   <div style="position:absolute;right:${24*k}px;bottom:${30*k}px;color:rgba(255,255,255,.9);font-weight:700;font-size:${30*k*0.54}px">Shotlog</div></div>`;
+  document.body.appendChild(o);try{if(navigator.wakeLock)window._wl=await navigator.wakeLock.request('screen')}catch(_){}
+  const v=$('fpv');let i=0,u=null;const close=()=>{try{v.pause()}catch(_){}if(u)URL.revokeObjectURL(u);o.remove();try{window._wl&&window._wl.release()}catch(_){}};
+  o.onclick=close;
+  const next=async()=>{if(i>=ids.length){setTimeout(close,600);return}const m=await get('media',ids[i++]);if(!m){next();return}if(u)URL.revokeObjectURL(u);u=URL.createObjectURL(m.blob);v.src=u;v.onended=next;v.play().catch(()=>{})};
+  setTimeout(next,1500)}
+const env0=()=>0;
 async function toggleEx(id){const c=R.clips.find(x=>x.id===id);c.ex=!c.ex;await put('sessions',R);renderRPre()}
 async function finishRound(){R.active=false;await put('sessions',R);log('round_end',{clips:R.clips.length});cur=R.id;R=null;go('detail',cur)}
 function drawOvl(c,W,h,par,yd){const k=W/390,t='HOLE '+h+(par?' | PAR '+par:'')+(yd?' | '+yd+' YDS':'');
@@ -266,7 +282,7 @@ let xq=1080;
 async function exportHole(h){
   const cl=R.clips.filter(c=>c.hole===h&&!c.ex);if(!cl.length)return;const xp=$('xp');
   const W=xq===720?720:1080,H=xq===720?1280:1920,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
-  const out=cv.captureStream(30),v=document.createElement('video');v.playsInline=true;v.setAttribute('playsinline','');
+  const out=cv.captureStream(window.CanvasCaptureMediaStreamTrack&&CanvasCaptureMediaStreamTrack.prototype.requestFrame?0:30),vtr=out.getVideoTracks()[0],manual=!!(vtr&&vtr.requestFrame&&out.getVideoTracks().length&&window.CanvasCaptureMediaStreamTrack&&CanvasCaptureMediaStreamTrack.prototype.requestFrame),v=document.createElement('video');let wl=null;try{wl=await navigator.wakeLock.request('screen')}catch(_){}v.playsInline=true;v.setAttribute('playsinline','');
   try{const ac=new(window.AudioContext||window.webkitAudioContext)();ac.resume();const src=ac.createMediaElementSource(v),d=ac.createMediaStreamDestination();src.connect(d);d.stream.getAudioTracks().forEach(t=>out.addTrack(t))}catch(_){}
   const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
   const rc=new MediaRecorder(out,Object.assign(mt?{mimeType:mt}:{},{videoBitsPerSecond:16000000})),ch=[];rc.ondataavailable=e=>e.data.size&&ch.push(e.data);
@@ -279,12 +295,12 @@ async function exportHole(h){
     await new Promise(r=>{v.onloadeddata=r;v.onerror=r;setTimeout(r,4000)});
     await v.play().catch(()=>{});
     await new Promise(res=>{let fin=false;const end=()=>{if(!fin){fin=true;res()}};v.onended=end;setTimeout(end,((isFinite(v.duration)&&v.duration)||10)*1000+3000);
-      const draw=()=>{const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);c.drawImage(ov,0,0)};
+      const draw=()=>{const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);c.drawImage(ov,0,0);if(manual)vtr.requestFrame()};
       draw();
       if(v.requestVideoFrameCallback){const loop=()=>{if(fin)return;draw();v.requestVideoFrameCallback(loop)};v.requestVideoFrameCallback(loop)}
       else{const f=()=>{if(fin)return;draw();requestAnimationFrame(f)};f()}});
     v.pause();URL.revokeObjectURL(u)}
-  rc.stop();await done;
+  rc.stop();await done;try{wl&&wl.release()}catch(_){}
   const ext=(mt||'').includes('mp4')?'mp4':'webm',blob=new Blob(ch,{type:mt||'video/webm'}),file=new File([blob],`shotlog-hole${h}.${ext}`,{type:blob.type});
   log('export',{hole:h,clips:cl.length});xp.innerHTML='できました。';
   const b=document.createElement('button');b.className='btn';b.textContent='共有 / 保存する';b.onclick=()=>{
