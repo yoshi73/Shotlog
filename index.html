@@ -57,15 +57,18 @@ const freeUrls=()=>{urls.forEach(URL.revokeObjectURL);urls=[]};
 
 async function load(){sessions=(await all('sessions')).sort((a,b)=>b.date.localeCompare(a.date)||b.created-a.created)}
 function newDraft(kind){return {id:uid(),kind:kind||'practice',date:today(),place:'',cond:3,memo:'',clubs:[],media:[],best:null,created:Date.now()}}
-function go(v,s){view=v;if(s!==undefined)cur=s;log('view',{v});render()}
+function go(v,s){stopCam();view=v;if(s!==undefined)cur=s;log('view',{v});render()}
 
 // ---------- render ----------
 async function render(){
   freeUrls();await load();
+  $('tab').style.display=(view==='round'||view==='rpre')?'none':'flex';
   $('tab').innerHTML=[['new','入力'],['list','一覧']].map(([k,l])=>`<button class="${view===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
   if(view==='new')return renderNew();
   if(view==='list')return renderList();
   if(view==='detail')return renderDetail();
+  if(view==='round')return renderRound();
+  if(view==='rpre')return renderRPre();
 }
 async function thumbs(ids,sel,best,rm){
   let h='';for(let i=0;i<ids.length;i++){const m=await get('media',ids[i]);if(!m)continue;const u=blobUrl(m.blob);
@@ -78,7 +81,7 @@ async function renderNew(){
   const prev=prevS?`<div><div class="lab">前回のメモ(${fmt(prevS.date)})</div><div class="prev">${esc(prevS.memo)}</div></div>`:'';
   $('app').innerHTML=`<div class="top"><h1>Shotlog</h1><button class="btn sm sub" onclick="exportEvents()">使用記録</button></div>
   <div class="wrap">
-  <div class="seg"><button class="${draft.kind==='practice'?'on':''}" onclick="setKind('practice')">練習</button><button class="${draft.kind==='round'?'on':''}" onclick="setKind('round')">ラウンド</button></div>
+  <div class="seg"><button class="on">練習</button><button onclick="go('round')">ラウンド</button></div>
   ${prev}
   <div><div class="lab">日付</div><input type="text" id="date" value="${draft.date}" onchange="draft.date=this.value" style="display:none"><input type="date" value="${draft.date}" onchange="draft.date=this.value" style="width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font:inherit;background:var(--card)"></div>
   <div><div class="lab">場所</div><input type="text" value="${esc(draft.place)}" placeholder="○○ゴルフ練習場" oninput="draft.place=this.value"></div>
@@ -98,7 +101,7 @@ async function rmMedia(i){const id=draft.media[i];draft.media.splice(i,1);if(dra
 async function save(){await put('sessions',draft);log('save',{kind:draft.kind,media:draft.media.length});cur=draft.id;draft=null;go('detail',cur)}
 
 async function renderList(){
-  $('app').innerHTML=`<div class="top"><h1>一覧</h1></div><div class="wrap">${sessions.length?sessions.map(s=>`<button class="row" onclick="go('detail','${s.id}')"><div><b>${fmt(s.date)}${s.kind==='round'?' ・ラウンド':''}</b><small>${esc(s.place||'場所なし')} ・ 動画/写真 ${s.media.length}</small></div><span class="pill">調子 ${s.cond}</span></button>`).join(''):'<div class="hint">まだ記録がありません。「入力」から1件つくってください。</div>'}</div>`}
+  $('app').innerHTML=`<div class="top"><h1>一覧</h1></div><div class="wrap">${sessions.length?sessions.map(s=>`<button class="row" onclick="go('detail','${s.id}')"><div><b>${fmt(s.date)}${s.kind==='round'?(s.active?' ・ラウンド中':' ・ラウンド'):''}</b><small>${esc(s.place||'場所なし')} ・ 動画/写真 ${s.media.length}</small></div><span class="pill">調子 ${s.cond}</span></button>`).join(''):'<div class="hint">まだ記録がありません。「入力」から1件つくってください。</div>'}</div>`}
 
 let sel=0;
 function pick(i){sel=i;renderDetail()}
@@ -114,6 +117,7 @@ async function renderDetail(){
   ${s.media.length?`<div class="thumbs">${await thumbs(s.media,sel,s.best,false)}</div><button class="btn ${isBest?'':'sub'}" onclick="toggleBest()">${isBest?'★ ベストの1打(タップで外す)':'☆ これをベストの1打にする'}</button>`:''}
   <div><div class="lab">メモ</div><div class="prev">${esc(s.memo)||'—'}</div></div>
   <div><div class="lab">使ったクラブ</div><div class="chips">${s.clubs.map(c=>`<span class="chip">${c}</span>`).join('')||'—'}</div></div>
+  ${s.kind==='round'?'<button class="btn" onclick="openRPre()">ホールごとに書き出す</button>':''}
   <button class="btn sub" onclick="remove()">この記録を削除</button></div>`}
 async function toggleBest(){const s=sessions.find(x=>x.id===cur);const id=s.media[sel]||s.media[0];s.best=s.best===id?null:id;await put('sessions',s);log('best',{on:!!s.best});renderDetail()}
 function edit(){draft=JSON.parse(JSON.stringify(sessions.find(x=>x.id===cur)));go('new')}
@@ -149,6 +153,116 @@ async function shareImg(){const cv=$('cv');const b=await new Promise(r=>cv.toBlo
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='shotlog.png';a.click()}}
 async function exportEvents(){const ev=await all('events');const t=ev.length+'件の操作記録\n'+JSON.stringify(ev.slice(-200));const b=new Blob([t],{type:'text/plain'});const f=new File([b],'shotlog-events.txt',{type:'text/plain'});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='shotlog-events.txt';a.click()}}
+
+
+// ---------- round ----------
+let R=null,stream=null,mr=null,chunks=[],rec=false,timer=null,tick=null,t0=0,rsel=1;
+const PARS=[3,4,5];
+const pname=()=>{try{return localStorage.getItem('shotlog_name')||'PLAYER'}catch(_){return 'PLAYER'}};
+function newRound(){return {...newDraft('round'),active:true,hole:1,pars:{},yards:{},clips:[],hist:[]}}
+const cnt=h=>R.clips.filter(c=>c.hole===h).length;
+function stopCam(){if(rec){try{mr.onstop=null;mr.stop()}catch(_){}rec=false;clearTimeout(timer);clearInterval(tick)}
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:true});
+  const v=$('cam');if(v){v.srcObject=stream;v.play().catch(()=>{})}}catch(e){stream=null;const m=$('camerr');if(m)m.style.display='block'}}
+async function renderRound(){
+  R=sessions.find(s=>s.active&&s.kind==='round')||null;
+  if(!R){R=newRound();await put('sessions',R);log('round_start',{})}
+  try{if(!localStorage.getItem('shotlog_name')){const n=prompt('オーバーレイに出す名前','');localStorage.setItem('shotlog_name',((n||'').trim())||'PLAYER')}}catch(_){}
+  $('app').innerHTML=`<div class="top"><button class="btn sm sub" onclick="go('new')">‹ 戻る</button><b>ラウンド中</b><button class="btn sm" onclick="endRound()">確認・書き出し</button></div>
+  <div class="wrap" style="gap:10px;padding-bottom:110px">
+   <div style="display:flex;align-items:baseline;gap:12px"><div id="hn" style="font-size:44px;font-weight:700;line-height:1"></div><div id="sn" style="font-size:20px;font-weight:700;color:var(--g)"></div></div>
+   <div style="display:flex;gap:8px;align-items:center"><div class="chips" id="pc"></div><input id="yd" type="text" inputmode="numeric" placeholder="ヤード" style="width:96px;height:40px;padding:0 10px" oninput="setYard(this.value)"></div>
+   <div id="vf" style="position:relative;height:36vh;aspect-ratio:9/16;margin:0 auto;border-radius:16px;overflow:hidden;background:#17261F">
+    <video id="cam" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover"></video>
+    <div id="ov" style="position:absolute;right:6px;top:6px;border-radius:5px;overflow:hidden;font-weight:700;font-size:10px;color:#fff;text-align:center"></div>
+    <div id="rp" style="display:none;position:absolute;left:8px;bottom:8px;background:#C0392B;color:#fff;border-radius:12px;padding:3px 10px;font-size:12px;font-weight:700"></div>
+    <div id="camerr" style="display:none;position:absolute;inset:0;color:#fff;font-size:12px;padding:30px 12px;text-align:center">カメラが使えません。下のボタンで標準カメラから撮れます</div>
+   </div>
+   <input type="file" id="rf" accept="video/*" capture="environment" hidden onchange="if(this.files[0])addClip(this.files[0]);this.value=''">
+   <div style="display:flex;justify-content:center"><button id="rb" onclick="toggleRec()" aria-label="録画" style="width:84px;height:84px;border-radius:42px;border:6px solid var(--g);background:#fff;padding:0"><div id="rd" style="margin:auto;width:56px;height:56px;border-radius:28px;background:#C0392B"></div></button></div>
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 14px"><div id="last" style="font-size:14px"></div><button id="undo" class="btn sm sub" onclick="undo()"></button></div>
+  </div>
+  <div style="position:fixed;left:0;right:0;bottom:0;padding:10px 20px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)"><button class="btn" style="background:var(--lime);color:var(--ink)" onclick="nextHole()">次のホール ›</button></div>`;
+  upd();startCam()}
+function upd(){if(view!=='round'||!R)return;const h=R.hole,par=R.pars[h],yd=R.yards[h];
+  $('hn').textContent=h+'番';$('sn').textContent=(cnt(h)+1)+'打目 撮影';
+  $('pc').innerHTML=PARS.map(p=>`<button class="chip ${par===p?'on':''}" onclick="setPar(${p})">Par ${p}</button>`).join('');
+  const y=$('yd');if(document.activeElement!==y)y.value=yd||'';
+  $('ov').innerHTML=`<div style="background:#1F4D3A;padding:3px 10px">${esc(pname())}</div><div style="background:#17261F;padding:3px 10px;white-space:nowrap">HOLE ${h}${par?' | PAR '+par:''}${yd?' | '+esc(yd)+' YDS':''}</div>`;
+  $('rd').style.borderRadius=rec?'8px':'28px';$('rd').style.width=$('rd').style.height=rec?'30px':'56px';
+  const rp=$('rp');rp.style.display=rec?'block':'none';
+  const hi=R.hist[R.hist.length-1];
+  $('last').textContent=!hi?'まだ操作はありません':hi.t==='clip'?`${hi.hole}番 ${hi.n}打目 を保存しました`:`${hi.from}番 → ${R.hole}番`;
+  const u=$('undo');u.textContent=!hi?'—':hi.t==='clip'?'撮り直す':'戻す';u.disabled=!hi;u.style.opacity=hi?1:.4}
+async function setPar(p){R.pars[R.hole]=R.pars[R.hole]===p?undefined:p;if(R.pars[R.hole]===undefined)delete R.pars[R.hole];await put('sessions',R);upd()}
+let ysave=null;function setYard(v){R.yards[R.hole]=v;if(!v)delete R.yards[R.hole];$('ov').children[1].textContent='HOLE '+R.hole+(R.pars[R.hole]?' | PAR '+R.pars[R.hole]:'')+(v?' | '+v+' YDS':'');clearTimeout(ysave);ysave=setTimeout(()=>put('sessions',R),400)}
+function toggleRec(){rec?stopRec():startRec()}
+function startRec(){if(!stream||typeof MediaRecorder==='undefined'){$('rf').click();return}
+  const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+  chunks=[];mr=new MediaRecorder(stream,mt?{mimeType:mt}:{});mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  mr.onstop=async()=>{await addClip(new Blob(chunks,{type:mr.mimeType||mt||'video/mp4'}))};
+  mr.start();rec=true;t0=Date.now();timer=setTimeout(stopRec,10000);
+  tick=setInterval(()=>{const r=$('rp');if(r)r.textContent='● 撮影中 '+Math.min(10,Math.ceil((Date.now()-t0)/1000))+'/10秒'},200);upd()}
+function stopRec(){if(!rec)return;rec=false;clearTimeout(timer);clearInterval(tick);try{mr.stop()}catch(_){}upd()}
+async function addClip(blob){const id=uid(),n=cnt(R.hole)+1;await put('media',{id,type:blob.type||'video/mp4',blob,name:''});
+  R.media.push(id);R.clips.push({id,hole:R.hole,ex:false});R.hist.push({t:'clip',id,hole:R.hole,n});await put('sessions',R);log('clip',{hole:R.hole});upd()}
+async function undo(){const hi=R.hist.pop();if(!hi)return;
+  if(hi.t==='clip'){R.clips=R.clips.filter(c=>c.id!==hi.id);R.media=R.media.filter(x=>x!==hi.id);await del('media',hi.id)}
+  else R.hole=hi.from;
+  await put('sessions',R);log('undo',{t:hi.t});upd()}
+async function nextHole(){if(R.hole>=18)return;R.hist.push({t:'hole',from:R.hole});R.hole++;await put('sessions',R);log('next_hole',{});upd()}
+function endRound(){rsel=R.hole;go('rpre')}
+function openRPre(){R=sessions.find(x=>x.id===cur);rsel=1;go('rpre')}
+async function renderRPre(){
+  if(!R)return go('list');
+  const h=rsel,cl=R.clips.filter(c=>c.hole===h),live=R.clips.filter(c=>!c.ex);
+  const grid=Array.from({length:18},(_,i)=>{const n=i+1,k=R.clips.filter(c=>c.hole===n&&!c.ex).length;
+    return `<button onclick="rsel=${n};renderRPre()" style="height:46px;border:0;border-radius:10px;font-weight:700;background:${n===h?'var(--g)':k?'var(--chip)':'transparent'};color:${n===h?'#fff':k?'var(--g)':'#9a9a8a'};border:${k||n===h?'0':'1px dashed var(--line)'}">${n}<div style="font-size:10px;font-weight:400">${k?k+'打':'—'}</div></button>`}).join('');
+  let tiles='';for(const c of cl){const m=await get('media',c.id);if(!m)continue;const u=blobUrl(m.blob);
+    tiles+=`<div style="position:relative;width:88px;flex:0 0 auto"><div class="th" style="width:88px;height:156px;opacity:${c.ex?.35:1}"><video src="${u}#t=0.1" muted playsinline preload="metadata"></video></div><button onclick="toggleEx('${c.id}')" style="position:absolute;right:-4px;top:-4px;width:28px;height:28px;border-radius:14px;border:0;background:#17261F;color:#fff">${c.ex?'↺':'×'}</button></div>`}
+  const par=R.pars[h],yd=R.yards[h];
+  $('app').innerHTML=`<div class="top"><button class="btn sm sub" onclick="${R.active?"go('round')":"go('detail',R.id)"}">‹ ${R.active?'撮影に戻る':'詳細'}</button><b>確認して書き出す</b><span></span></div>
+  <div class="wrap">
+   <div class="hint">全${live.length}打 ・ 1ホールずつ縦動画にします</div>
+   <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">${grid}</div>
+   <div class="lab" style="margin:0">${h}番 ${par?'Par '+par:''} ${yd?yd+'yd':''}</div>
+   <div class="thumbs" style="gap:12px;padding:6px 4px">${tiles||'<div class="hint">このホールの動画はありません</div>'}</div>
+   <button class="btn" onclick="exportHole(${h})" ${R.clips.some(c=>c.hole===h&&!c.ex)?'':'disabled style="opacity:.4"'}>${h}H を書き出す</button>
+   <div id="xp" class="hint"></div>
+   ${R.active?'<button class="btn sub" onclick="finishRound()">ラウンドを保存して終わる</button>':''}
+  </div>`}
+async function toggleEx(id){const c=R.clips.find(x=>x.id===id);c.ex=!c.ex;await put('sessions',R);renderRPre()}
+async function finishRound(){R.active=false;await put('sessions',R);log('round_end',{clips:R.clips.length});cur=R.id;R=null;go('detail',cur)}
+function drawOvl(c,W,h,par,yd){const k=W/390,t='HOLE '+h+(par?' | PAR '+par:'')+(yd?' | '+yd+' YDS':'');
+  c.font=`bold ${12*k}px -apple-system,sans-serif`;const w=Math.max(150*k,c.measureText(t).width+24*k),x=W-12*k-w,y=16*k;
+  c.textAlign='center';c.fillStyle='#1F4D3A';c.fillRect(x,y,w,22*k);c.fillStyle='#fff';c.fillText(pname(),x+w/2,y+16*k);
+  c.fillStyle='#17261F';c.fillRect(x,y+22*k,w,24*k);c.fillStyle='#fff';c.fillText(t,x+w/2,y+39*k);c.textAlign='left'}
+async function exportHole(h){
+  const cl=R.clips.filter(c=>c.hole===h&&!c.ex);if(!cl.length)return;const xp=$('xp');
+  const W=720,H=1280,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
+  const out=cv.captureStream(30),v=document.createElement('video');v.playsInline=true;v.setAttribute('playsinline','');
+  try{const ac=new(window.AudioContext||window.webkitAudioContext)();ac.resume();const src=ac.createMediaElementSource(v),d=ac.createMediaStreamDestination();src.connect(d);d.stream.getAudioTracks().forEach(t=>out.addTrack(t))}catch(_){}
+  const mt=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+  const rc=new MediaRecorder(out,mt?{mimeType:mt}:{}),ch=[];rc.ondataavailable=e=>e.data.size&&ch.push(e.data);
+  const done=new Promise(r=>rc.onstop=r);rc.start();
+  const par=R.pars[h],yd=R.yards[h];
+  for(let i=0;i<cl.length;i++){
+    xp.textContent=`書き出し中 ${i+1}/${cl.length} (画面を消さずにお待ちください)`;
+    const m=await get('media',cl[i].id);if(!m)continue;const u=URL.createObjectURL(m.blob);v.src=u;
+    await new Promise(r=>{v.onloadeddata=r;v.onerror=r;setTimeout(r,4000)});
+    await v.play().catch(()=>{});
+    await new Promise(res=>{let fin=false;const end=()=>{if(!fin){fin=true;res()}};v.onended=end;setTimeout(end,12500);
+      const f=()=>{if(fin)return;c.fillStyle='#000';c.fillRect(0,0,W,H);const iw=v.videoWidth||W,ih=v.videoHeight||H,r=Math.max(W/iw,H/ih);
+        c.drawImage(v,(W-iw*r)/2,(H-ih*r)/2,iw*r,ih*r);drawOvl(c,W,h,par,yd);
+        c.font='bold 30px -apple-system,sans-serif';c.fillStyle='rgba(255,255,255,.9)';c.textAlign='right';c.fillText('Shotlog',W-24,H-30);c.textAlign='left';requestAnimationFrame(f)};f()});
+    v.pause();URL.revokeObjectURL(u)}
+  rc.stop();await done;
+  const ext=(mt||'').includes('mp4')?'mp4':'webm',blob=new Blob(ch,{type:mt||'video/webm'}),file=new File([blob],`shotlog-hole${h}.${ext}`,{type:blob.type});
+  log('export',{hole:h,clips:cl.length});xp.innerHTML='できました。';
+  const b=document.createElement('button');b.className='btn';b.textContent='共有 / 保存する';b.onclick=()=>{
+    if(navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=file.name;a.click()}};
+  xp.appendChild(b)}
 
 open().then(()=>{if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});log('launch',{});render()});
 </script></body></html>
